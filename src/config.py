@@ -3,8 +3,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "869ecd5b0704b3695a3d901088b908fee05898b54e12d97b9016907ca24cd5ff")
+PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "")
+PERPLEXITY_MODEL = os.environ.get("PERPLEXITY_MODEL", "sonar")
 
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "mistral")
 

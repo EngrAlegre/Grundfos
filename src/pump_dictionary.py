@@ -1,6 +1,7 @@
 import os
 import json
 from src.config import DATA_DIR
+from src.normalizer import normalize_phase
 
 # 1. The file you provided (Read-Only)
 SOURCE_DB_FILE = os.path.join(DATA_DIR, "tableConvert.com_oj4t4q.json")
@@ -37,12 +38,13 @@ class PumpDictionary:
                     # Only index if we have an ID
                     if mfr and prod:
                         key = f"{str(mfr).upper()}_{str(prod).upper()}"
+                        raw_phase = norm_row.get("PHASE", "unknown")
                         self.data[key] = {
                             "MANUFACTURER": mfr,
                             "PRODNAME": prod,
                             "FLOWNOM56": norm_row.get("FLOWNOM56", "unknown"),
                             "HEADNOM56": norm_row.get("HEADNOM56", "unknown"),
-                            "PHASE": norm_row.get("PHASE", "unknown"),
+                            "PHASE": normalize_phase(raw_phase),
                             "_source": "local_database"
                         }
             elif isinstance(raw_data, dict):

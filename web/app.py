@@ -6,8 +6,7 @@ import streamlit as st
 import json
 import re
 import time
-from src.agent import lookup_pump
-from src.pump_dictionary import get_from_db  # Added import for local DB lookup
+from src.agent import lookup_pump, answer_about_pump
 
 st.set_page_config(
     page_title="NeuralFlow - Pump Researcher",
@@ -83,6 +82,21 @@ st.markdown("""
         border-radius: 16px;
         padding: 20px;
     }
+    .ai-answer-card {
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+        border: 1px solid #4f46e5;
+        border-radius: 12px;
+        padding: 20px;
+        margin-top: 16px;
+        color: #e0e7ff;
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }
+    .ai-answer-card h4 {
+        margin: 0 0 10px 0;
+        color: #a5b4fc;
+        font-size: 1rem;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,6 +130,18 @@ def parse_natural_query(query: str) -> tuple[str, str]:
     if len(parts) == 2:
         return parts[0].upper(), parts[1].strip()
     return "", query
+
+
+_QUESTION_PATTERNS = re.compile(
+    r"\?|"
+    r"\b(?:what|how|why|where|when|which|who|does|is\s+it|can\s+it|"
+    r"tell\s+me|explain|describe|suitable|recommend|compare)\b",
+    re.IGNORECASE,
+)
+
+
+def is_question(query: str) -> bool:
+    return bool(_QUESTION_PATTERNS.search(query))
 
 
 # Helper to display a single result column (Web or Local)
@@ -184,27 +210,26 @@ with tab1:
         if not manufacturer:
             st.warning("Could not detect the manufacturer. Try: `TACO 0014-SF1`")
         else:
-            # IMPORTANT: Fetch Local Data FIRST to avoid the Web search overwriting it before display
-            local_result = get_from_db(manufacturer, prodname)
-            
-            # 2. Fetch Web Data (Force web search)
             with st.spinner(f"Searching web for {manufacturer} {prodname}..."):
                 start = time.time()
                 web_result = lookup_pump(manufacturer, prodname, force_web=True)
                 web_elapsed = time.time() - start
 
-            # 3. Display in 2 Columns
-            col_web, col_db = st.columns(2)
-            
-            with col_web:
-                render_single_result("🌐 Web Search Result", web_result, manufacturer, prodname, web_elapsed, "web")
-            
-            with col_db:
-                if local_result:
-                    render_single_result("💾 Local Database", local_result, manufacturer, prodname, None, "local")
+            render_single_result("🌐 Web Search Result", web_result, manufacturer, prodname, web_elapsed, "web")
+
+            if is_question(query):
+                with st.spinner("Generating AI answer..."):
+                    answer = answer_about_pump(manufacturer, prodname, query)
+                if answer:
+                    st.markdown(
+                        f'<div class="ai-answer-card">'
+                        f'<h4>🤖 AI Answer</h4>'
+                        f'{answer}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
                 else:
-                    st.markdown("#### 💾 Local Database")
-                    st.info("No data found in local database.")
+                    st.info("Could not generate an explanation for this pump.")
 
 with tab2:
     with st.form("manual_form"):
@@ -219,27 +244,12 @@ with tab2:
         manual_submit = st.form_submit_button("Look Up", use_container_width=True)
 
     if manual_submit and prod:
-        # IMPORTANT: Fetch Local Data FIRST
-        local_result = get_from_db(mfr, prod)
-        
-        # 2. Fetch Web Data (Force web search)
         with st.spinner(f"Searching web for {mfr} {prod}..."):
             start = time.time()
             web_result = lookup_pump(mfr, prod, force_web=True)
             web_elapsed = time.time() - start
 
-        # 3. Display in 2 Columns
-        col_web, col_db = st.columns(2)
-        
-        with col_web:
-            render_single_result("🌐 Web Search Result", web_result, mfr, prod, web_elapsed, "web")
-        
-        with col_db:
-            if local_result:
-                render_single_result("💾 Local Database", local_result, mfr, prod, None, "local")
-            else:
-                st.markdown("#### 💾 Local Database")
-                st.info("No data found in local database.")
+        render_single_result("🌐 Web Search Result", web_result, mfr, prod, web_elapsed, "web")
 
 st.markdown("---")
-st.markdown('<div class="search-hint">Powered by SerpAPI + Mistral 7B | Results cached for faster repeat lookups</div>', unsafe_allow_html=True)
+st.markdown('<div class="search-hint">Powered by Perplexity AI (Sonar) | Web search + extraction in one call</div>', unsafe_allow_html=True)

@@ -2,15 +2,17 @@ import re
 
 
 def normalize_phase(val) -> int | str:
-    if val == "unknown":
+    if val == "unknown" or val is None:
         return "unknown"
-    s = str(val).strip()
-    if s in ("1", "1.0"):
+    s = str(val).strip().lower()
+    if s in ("1", "1.0", "single", "1-phase", "1 phase"):
         return 1
-    if s in ("3", "3.0"):
+    if s in ("3", "3.0", "three", "3-phase", "3 phase"):
         return 3
     if re.match(r"1[/-]3|3[/-]1", s):
         return 3
+    if re.match(r"1[/-]mar|mar[/-]1|1[/-]jan|jan[/-]1|3[/-]jan|jan[/-]3", s):
+        return 1
     try:
         v = int(float(s))
         if v in (1, 3):
