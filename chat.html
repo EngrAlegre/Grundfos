@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NeuralFlow Assistant</title>
+<link rel="stylesheet" href="style.css">
+<script src="chat.js" defer></script>
+</head>
+
+<body>
+
+<div class="app">
+
+  <aside class="sidebar">
+
+    <a href="landing_page.html" class="brand">NEURAL<span>FLOW</span></a>
+
+    <div class="top-actions">
+      <button class="new-chat">+ New chat</button>
+      <button class="search-chat">🔍 Search chats</button>
+    </div>
+
+    <div class="history-section">
+      <div class="history-header">
+        <span>Your conversations</span>
+        <span class="clear">Clear All</span>
+      </div>
+
+      <div class="history" id="historyList"></div>
+    </div>
+
+  </aside>
+
+  <main class="main">
+
+    <!-- CHAT OUTPUT AREA -->
+    <div class="chat-area" id="chatArea"></div>
+
+    <!-- INPUT -->
+    <div class="input-box">
+      <input id="pumpInput" type="text" placeholder="Enter pump model...">
+      <button>➤</button>
+    </div>
+
+  </main>
+
+</div>
+
+</body>
+</html>
