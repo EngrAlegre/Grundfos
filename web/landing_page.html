@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NeuralFlow</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="landing">
+
+<div class="hero">
+
+  <div class="hero-image"></div>
+
+  <div class="hero-content">
+<h1 class="logo">NEURAL<span>FLOW</span></h1>
+<p class="subtitle">Smart Pump Specification Assistant</p>
+
+<div class="divider"></div>
+
+<h2 class="hero-title">
+  Find Pump Specifications in<br>
+  Seconds.
+</h2>
+
+<p class="desc-main">
+  NeuralFlow is an intelligent pump research assistant that automatically extracts
+  and organizes technical specifications from structured datasets and product sources.
+</p>
+
+<p class="desc-sub">
+  Simply enter a pump model and receive accurate flow rates, head values,
+  power requirements, and operating details in seconds.
+</p>
+
+<p class="highlight-text">Start analyzing pump data now.</p>
+
+<a href="/chat" class="btn-primary">Get Specifications</a>
+<a href="#" class="btn-secondary" id="howItWorksBtn">How it Works</a>
+  </div>
+
+</div>
+
+<div class="modal-overlay" id="howItWorksModal">
+
+  <div class="modal">
+
+    <div class="modal-header">
+      <h2>How NeuralFlow Works</h2>
+      <span class="close-modal" id="closeModal">&times;</span>
+    </div>
+
+    <div class="modal-content">
+      <ol>
+        <li>Enter a pump model number.</li>
+        <li>NeuralFlow searches structured datasets.</li>
+        <li>Specifications are extracted and validated.</li>
+        <li>Results are displayed instantly.</li>
+      </ol>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const btn = document.getElementById("howItWorksBtn");
+const modal = document.getElementById("howItWorksModal");
+const closeBtn = document.getElementById("closeModal");
+
+btn.addEventListener("click", (e) => {
+  e.preventDefault();
+  modal.classList.add("active");
+});
+
+closeBtn.addEventListener("click", () => {
+  modal.classList.remove("active");
+});
+
+modal.addEventListener("click", (e) => {
+  if (e.target === modal) {
+    modal.classList.remove("active");
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    modal.classList.remove("active");
+  }
+});
+</script>
+
+
+</body>
+</html>
+

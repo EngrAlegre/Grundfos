@@ -1,0 +1,213 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import streamlit as st
+import json
+import re
+import time
+from src.agent import lookup_pump
+
+st.set_page_config(
+    page_title="NeuralFlow - Pump Researcher",
+    page_icon="🔍",
+    layout="centered",
+)
+
+st.markdown("""
+<style>
+    .main-title {
+        font-size: 2.8rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+        margin-bottom: 0;
+    }
+    .subtitle {
+        text-align: center;
+        color: #6b7280;
+        font-size: 1.1rem;
+        margin-top: -10px;
+        margin-bottom: 30px;
+    }
+    .result-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        border-radius: 16px;
+        padding: 24px;
+        margin: 16px 0;
+    }
+    .metric-label {
+        font-size: 0.85rem;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        margin-bottom: 4px;
+    }
+    .metric-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #1f2937;
+    }
+    .unknown-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #9ca3af;
+    }
+    .search-hint {
+        text-align: center;
+        color: #9ca3af;
+        font-size: 0.9rem;
+        margin-top: 10px;
+    }
+    div[data-testid="stForm"] {
+        border: 2px solid #e5e7eb;
+        border-radius: 16px;
+        padding: 20px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="main-title">NeuralFlow</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">AI-Powered Pump Specification Researcher</div>', unsafe_allow_html=True)
+
+
+def parse_natural_query(query: str) -> tuple[str, str]:
+    query = query.strip()
+
+    known_brands = [
+        "TACO", "WILO", "BIRAL", "EMB", "SMEDEGAARD",
+        "DAB", "CIRCAL", "LOEWE", "GRUNDFOS", "XYLEM",
+    ]
+
+    prefixes = [
+        r"(?:give\s+me\s+)?(?:the\s+)?(?:specifications?|specs?|data|info)\s+(?:for|of|on)\s+(?:a\s+)?",
+        r"(?:look\s*up|search|find|get)\s+",
+        r"(?:what\s+(?:are|is)\s+the\s+(?:specs?|specifications?|data)\s+(?:for|of)\s+)",
+    ]
+    for p in prefixes:
+        query = re.sub(p, "", query, flags=re.IGNORECASE).strip()
+
+    for brand in known_brands:
+        pattern = rf"^{re.escape(brand)}\b\s*(.+)"
+        m = re.match(pattern, query, re.IGNORECASE)
+        if m:
+            return brand.upper(), m.group(1).strip()
+
+    parts = query.split(None, 1)
+    if len(parts) == 2:
+        return parts[0].upper(), parts[1].strip()
+    return "", query
+
+
+tab1, tab2 = st.tabs(["Natural Search", "Manual Input"])
+
+with tab1:
+    with st.form("natural_form"):
+        query = st.text_input(
+            "Ask about any pump",
+            placeholder="e.g. Give me the specifications for a TACO 0014-SF1",
+        )
+        submitted = st.form_submit_button("Search", use_container_width=True)
+
+    if submitted and query:
+        manufacturer, prodname = parse_natural_query(query)
+        if not manufacturer:
+            st.warning("Could not detect the manufacturer. Try: `TACO 0014-SF1`")
+        else:
+            with st.spinner(f"Searching for {manufacturer} {prodname}..."):
+                start = time.time()
+                result = lookup_pump(manufacturer, prodname)
+                elapsed = time.time() - start
+
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            flow = result.get("FLOWNOM56", "unknown")
+            head = result.get("HEADNOM56", "unknown")
+            phase = result.get("PHASE", "unknown")
+
+            with col1:
+                cls = "unknown-value" if flow == "unknown" else "metric-value"
+                display = "N/A" if flow == "unknown" else f"{flow}"
+                unit = "" if flow == "unknown" else " m3/h"
+                st.markdown(f'<div class="metric-label">Flow Rate</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+
+            with col2:
+                cls = "unknown-value" if head == "unknown" else "metric-value"
+                display = "N/A" if head == "unknown" else f"{head}"
+                unit = "" if head == "unknown" else " m"
+                st.markdown(f'<div class="metric-label">Head</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+
+            with col3:
+                cls = "unknown-value" if phase == "unknown" else "metric-value"
+                display = "N/A" if phase == "unknown" else f"{phase}-Phase"
+                st.markdown(f'<div class="metric-label">Electrical Phase</div><div class="{cls}">{display}</div>', unsafe_allow_html=True)
+
+            st.caption(f"Pump: **{manufacturer} {prodname}** | Completed in {elapsed:.1f}s")
+
+            with st.expander("Raw JSON"):
+                output = {
+                    "MANUFACTURER": manufacturer,
+                    "PRODNAME": prodname,
+                    "FLOWNOM56": flow,
+                    "HEADNOM56": head,
+                    "PHASE": phase,
+                }
+                st.json(output)
+
+with tab2:
+    with st.form("manual_form"):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            mfr = st.selectbox(
+                "Manufacturer",
+                ["TACO", "WILO", "BIRAL (BIERI, HOVAL)", "EMB", "SMEDEGAARD", "DAB / CIRCAL", "LOEWE"],
+            )
+        with col_b:
+            prod = st.text_input("Product Name", placeholder="e.g. 0014-SF1")
+        manual_submit = st.form_submit_button("Look Up", use_container_width=True)
+
+    if manual_submit and prod:
+        with st.spinner(f"Searching for {mfr} {prod}..."):
+            start = time.time()
+            result = lookup_pump(mfr, prod)
+            elapsed = time.time() - start
+
+        st.markdown("---")
+        col1, col2, col3 = st.columns(3)
+        flow = result.get("FLOWNOM56", "unknown")
+        head = result.get("HEADNOM56", "unknown")
+        phase = result.get("PHASE", "unknown")
+
+        with col1:
+            cls = "unknown-value" if flow == "unknown" else "metric-value"
+            display = "N/A" if flow == "unknown" else f"{flow}"
+            unit = "" if flow == "unknown" else " m3/h"
+            st.markdown(f'<div class="metric-label">Flow Rate</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+
+        with col2:
+            cls = "unknown-value" if head == "unknown" else "metric-value"
+            display = "N/A" if head == "unknown" else f"{head}"
+            unit = "" if head == "unknown" else " m"
+            st.markdown(f'<div class="metric-label">Head</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+
+        with col3:
+            cls = "unknown-value" if phase == "unknown" else "metric-value"
+            display = "N/A" if phase == "unknown" else f"{phase}-Phase"
+            st.markdown(f'<div class="metric-label">Electrical Phase</div><div class="{cls}">{display}</div>', unsafe_allow_html=True)
+
+        st.caption(f"Pump: **{mfr} {prod}** | Completed in {elapsed:.1f}s")
+
+        with st.expander("Raw JSON"):
+            output = {
+                "MANUFACTURER": mfr,
+                "PRODNAME": prod,
+                "FLOWNOM56": flow,
+                "HEADNOM56": head,
+                "PHASE": phase,
+            }
+            st.json(output)
+
+st.markdown("---")
+st.markdown('<div class="search-hint">Powered by SerpAPI + Mistral 7B | Results cached for faster repeat lookups</div>', unsafe_allow_html=True)

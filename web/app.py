@@ -1,213 +1,236 @@
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import streamlit as st
-import json
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from pathlib import Path
 import re
-import time
-from src.agent import lookup_pump
+from typing import Any
 
-st.set_page_config(
-    page_title="NeuralFlow - Pump Researcher",
-    page_icon="🔍",
-    layout="centered",
-)
+from src.agent import lookup_pump_hybrid, answer_about_pump
 
-st.markdown("""
-<style>
-    .main-title {
-        font-size: 2.8rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-align: center;
-        margin-bottom: 0;
-    }
-    .subtitle {
-        text-align: center;
-        color: #6b7280;
-        font-size: 1.1rem;
-        margin-top: -10px;
-        margin-bottom: 30px;
-    }
-    .result-card {
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        border-radius: 16px;
-        padding: 24px;
-        margin: 16px 0;
-    }
-    .metric-label {
-        font-size: 0.85rem;
-        color: #6b7280;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 4px;
-    }
-    .metric-value {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #1f2937;
-    }
-    .unknown-value {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #9ca3af;
-    }
-    .search-hint {
-        text-align: center;
-        color: #9ca3af;
-        font-size: 0.9rem;
-        margin-top: 10px;
-    }
-    div[data-testid="stForm"] {
-        border: 2px solid #e5e7eb;
-        border-radius: 16px;
-        padding: 20px;
-    }
-</style>
-""", unsafe_allow_html=True)
 
-st.markdown('<div class="main-title">NeuralFlow</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">AI-Powered Pump Specification Researcher</div>', unsafe_allow_html=True)
+app = FastAPI()
+
+
+def _clean_prodname(text: str) -> str:
+    s = (text or "").strip()
+    if not s:
+        return ""
+
+    s = re.split(r"[?]", s, maxsplit=1)[0].strip()
+    s = re.split(r"\b(?:and|how|what|why|where|when|which|who)\b", s, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    s = s.strip().strip(".,;:!\"'()[]{}")
+    return s
 
 
 def parse_natural_query(query: str) -> tuple[str, str]:
     query = query.strip()
 
     known_brands = [
-        "TACO", "WILO", "BIRAL", "EMB", "SMEDEGAARD",
-        "DAB", "CIRCAL", "LOEWE", "GRUNDFOS", "XYLEM",
+        "TACO",
+        "WILO",
+        "BIRAL",
+        "EMB",
+        "SMEDEGAARD",
+        "DAB",
+        "CIRCAL",
+        "LOEWE",
+        "GRUNDFOS",
+        "XYLEM",
     ]
 
     prefixes = [
         r"(?:give\s+me\s+)?(?:the\s+)?(?:specifications?|specs?|data|info)\s+(?:for|of|on)\s+(?:a\s+)?",
         r"(?:look\s*up|search|find|get)\s+",
         r"(?:what\s+(?:are|is)\s+the\s+(?:specs?|specifications?|data)\s+(?:for|of)\s+)",
+        r"(?:what\s+is|what's|whats)\s+",
+        r"(?:tell\s+me\s+about)\s+",
     ]
     for p in prefixes:
         query = re.sub(p, "", query, flags=re.IGNORECASE).strip()
 
     for brand in known_brands:
-        pattern = rf"^{re.escape(brand)}\b\s*(.+)"
-        m = re.match(pattern, query, re.IGNORECASE)
-        if m:
-            return brand.upper(), m.group(1).strip()
+        m = re.search(rf"\b{re.escape(brand)}\b", query, flags=re.IGNORECASE)
+        if not m:
+            continue
+        prod = _clean_prodname(query[m.end() :])
+        return brand.upper(), prod
 
     parts = query.split(None, 1)
     if len(parts) == 2:
-        return parts[0].upper(), parts[1].strip()
-    return "", query
+        maybe_mfr = parts[0].upper()
+        if maybe_mfr in known_brands:
+            return maybe_mfr, _clean_prodname(parts[1])
+        return "", query.strip().strip(".,;:!?")
+    return "", query.strip().strip(".,;:!?")
 
 
-tab1, tab2 = st.tabs(["Natural Search", "Manual Input"])
+_QUESTION_PATTERNS = re.compile(
+    r"\?|"
+    r"\b(?:what|how|why|where|when|which|who|does|is\s+it|can\s+it|"
+    r"tell\s+me|explain|describe|suitable|recommend|compare)\b",
+    re.IGNORECASE,
+)
 
-with tab1:
-    with st.form("natural_form"):
-        query = st.text_input(
-            "Ask about any pump",
-            placeholder="e.g. Give me the specifications for a TACO 0014-SF1",
-        )
-        submitted = st.form_submit_button("Search", use_container_width=True)
 
-    if submitted and query:
-        manufacturer, prodname = parse_natural_query(query)
-        if not manufacturer:
-            st.warning("Could not detect the manufacturer. Try: `TACO 0014-SF1`")
-        else:
-            with st.spinner(f"Searching for {manufacturer} {prodname}..."):
-                start = time.time()
-                result = lookup_pump(manufacturer, prodname)
-                elapsed = time.time() - start
+def is_question(query: str) -> bool:
+    return bool(_QUESTION_PATTERNS.search(query))
 
-            st.markdown("---")
-            col1, col2, col3 = st.columns(3)
-            flow = result.get("FLOWNOM56", "unknown")
-            head = result.get("HEADNOM56", "unknown")
-            phase = result.get("PHASE", "unknown")
 
-            with col1:
-                cls = "unknown-value" if flow == "unknown" else "metric-value"
-                display = "N/A" if flow == "unknown" else f"{flow}"
-                unit = "" if flow == "unknown" else " m3/h"
-                st.markdown(f'<div class="metric-label">Flow Rate</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+class LookupRequest(BaseModel):
+    query: str
 
-            with col2:
-                cls = "unknown-value" if head == "unknown" else "metric-value"
-                display = "N/A" if head == "unknown" else f"{head}"
-                unit = "" if head == "unknown" else " m"
-                st.markdown(f'<div class="metric-label">Head</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
 
-            with col3:
-                cls = "unknown-value" if phase == "unknown" else "metric-value"
-                display = "N/A" if phase == "unknown" else f"{phase}-Phase"
-                st.markdown(f'<div class="metric-label">Electrical Phase</div><div class="{cls}">{display}</div>', unsafe_allow_html=True)
+class AskRequest(BaseModel):
+    manufacturer: str | None = None
+    prodname: str | None = None
+    question: str | None = None
+    text: str | None = None
 
-            st.caption(f"Pump: **{manufacturer} {prodname}** | Completed in {elapsed:.1f}s")
 
-            with st.expander("Raw JSON"):
-                output = {
-                    "MANUFACTURER": manufacturer,
-                    "PRODNAME": prodname,
-                    "FLOWNOM56": flow,
-                    "HEADNOM56": head,
-                    "PHASE": phase,
-                }
-                st.json(output)
+def _fallback_ai_answer(manufacturer: str, prodname: str, question: str) -> str:
+    from src.config import PERPLEXITY_API_KEY
+    from src.pump_dictionary import get_from_db
 
-with tab2:
-    with st.form("manual_form"):
-        col_a, col_b = st.columns(2)
-        with col_a:
-            mfr = st.selectbox(
-                "Manufacturer",
-                ["TACO", "WILO", "BIRAL (BIERI, HOVAL)", "EMB", "SMEDEGAARD", "DAB / CIRCAL", "LOEWE"],
-            )
-        with col_b:
-            prod = st.text_input("Product Name", placeholder="e.g. 0014-SF1")
-        manual_submit = st.form_submit_button("Look Up", use_container_width=True)
+    local = get_from_db(manufacturer, prodname) if manufacturer and prodname else None
+    flow = (local or {}).get("FLOWNOM56", "unknown")
+    head = (local or {}).get("HEADNOM56", "unknown")
+    phase = (local or {}).get("PHASE", "unknown")
 
-    if manual_submit and prod:
-        with st.spinner(f"Searching for {mfr} {prod}..."):
-            start = time.time()
-            result = lookup_pump(mfr, prod)
-            elapsed = time.time() - start
+    why = (
+        "PERPLEXITY_API_KEY is not set, so AI explanations are disabled."
+        if not PERPLEXITY_API_KEY
+        else "The AI explanation service failed for this request."
+    )
 
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        flow = result.get("FLOWNOM56", "unknown")
-        head = result.get("HEADNOM56", "unknown")
-        phase = result.get("PHASE", "unknown")
+    specs_bits = []
+    if flow != "unknown":
+        specs_bits.append(f"flow {flow} m3/h")
+    if head != "unknown":
+        specs_bits.append(f"head {head} m")
+    if phase != "unknown":
+        specs_bits.append(f"phase {phase}")
+    specs = f"Known specs: {', '.join(specs_bits)}." if specs_bits else "No verified specs available yet."
 
-        with col1:
-            cls = "unknown-value" if flow == "unknown" else "metric-value"
-            display = "N/A" if flow == "unknown" else f"{flow}"
-            unit = "" if flow == "unknown" else " m3/h"
-            st.markdown(f'<div class="metric-label">Flow Rate</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+    name = " ".join(x for x in [manufacturer, prodname] if x).strip() or "this pump"
 
-        with col2:
-            cls = "unknown-value" if head == "unknown" else "metric-value"
-            display = "N/A" if head == "unknown" else f"{head}"
-            unit = "" if head == "unknown" else " m"
-            st.markdown(f'<div class="metric-label">Head</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+    return (
+        f"I can’t generate the AI explanation right now ({why}) "
+        f"For {name}: {specs} "
+        "If you want accurate usage guidance, I need the AI key enabled or a local spec dataset. "
+        "General selection steps: confirm system duty point (flow/head), match voltage/phase, "
+        "check fluid/temperature limits, and follow manufacturer installation guidance."
+    )
 
-        with col3:
-            cls = "unknown-value" if phase == "unknown" else "metric-value"
-            display = "N/A" if phase == "unknown" else f"{phase}-Phase"
-            st.markdown(f'<div class="metric-label">Electrical Phase</div><div class="{cls}">{display}</div>', unsafe_allow_html=True)
 
-        st.caption(f"Pump: **{mfr} {prod}** | Completed in {elapsed:.1f}s")
+@app.post("/api/lookup")
+async def api_lookup(payload: LookupRequest):
+    query = (payload.query or "").strip()
+    manufacturer, prodname = parse_natural_query(query)
+    looks_like_question = is_question(query)
 
-        with st.expander("Raw JSON"):
-            output = {
-                "MANUFACTURER": mfr,
-                "PRODNAME": prod,
-                "FLOWNOM56": flow,
-                "HEADNOM56": head,
-                "PHASE": phase,
+    if not manufacturer:
+        return JSONResponse(
+            {
+                "manufacturer": "",
+                "prodname": prodname,
+                "is_question": looks_like_question,
+                "web_result": {"FLOWNOM56": "unknown", "HEADNOM56": "unknown", "PHASE": "unknown"},
+                "local_result": {"FLOWNOM56": "unknown", "HEADNOM56": "unknown", "PHASE": "unknown"},
+                "hybrid_comparison": None,
+                "error": "Could not detect manufacturer from query.",
             }
-            st.json(output)
+        )
 
-st.markdown("---")
-st.markdown('<div class="search-hint">Powered by SerpAPI + Mistral 7B | Results cached for faster repeat lookups</div>', unsafe_allow_html=True)
+    hybrid = lookup_pump_hybrid(manufacturer, prodname, force_web=True)
+    web_result = hybrid.get("web_result", {})
+    local_result = hybrid.get("local_result", {})
+    hybrid_comparison = hybrid.get("hybrid_comparison", None)
+
+    return JSONResponse(
+        {
+            "manufacturer": manufacturer,
+            "prodname": prodname,
+            "is_question": looks_like_question,
+            "web_result": web_result,
+            "local_result": local_result,
+            "hybrid_comparison": hybrid_comparison,
+        }
+    )
+
+
+@app.get("/api/lookup")
+async def api_lookup_get(q: str = ""):
+    query = (q or "").strip()
+    manufacturer, prodname = parse_natural_query(query)
+    looks_like_question = is_question(query)
+
+    if not manufacturer:
+        return JSONResponse(
+            {
+                "manufacturer": "",
+                "prodname": prodname,
+                "is_question": looks_like_question,
+                "web_result": {"FLOWNOM56": "unknown", "HEADNOM56": "unknown", "PHASE": "unknown"},
+                "local_result": {"FLOWNOM56": "unknown", "HEADNOM56": "unknown", "PHASE": "unknown"},
+                "hybrid_comparison": None,
+                "error": "Could not detect manufacturer from query.",
+            }
+        )
+
+    hybrid = lookup_pump_hybrid(manufacturer, prodname, force_web=True)
+    web_result = hybrid.get("web_result", {})
+    local_result = hybrid.get("local_result", {})
+    hybrid_comparison = hybrid.get("hybrid_comparison", None)
+
+    return JSONResponse(
+        {
+            "manufacturer": manufacturer,
+            "prodname": prodname,
+            "is_question": looks_like_question,
+            "web_result": web_result,
+            "local_result": local_result,
+            "hybrid_comparison": hybrid_comparison,
+        }
+    )
+
+
+@app.post("/api/ask")
+async def api_ask(payload: AskRequest):
+    text = (payload.text or "").strip()
+    manufacturer = (payload.manufacturer or "").strip()
+    prodname = (payload.prodname or "").strip()
+    question = (payload.question or "").strip()
+
+    if text and (not manufacturer or not prodname):
+        manufacturer, prodname = parse_natural_query(text)
+        question = question or text
+
+    ai_answer = None
+    if manufacturer and prodname and question and is_question(question):
+        ai_answer = answer_about_pump(manufacturer, prodname, question)
+        if not ai_answer:
+            ai_answer = _fallback_ai_answer(manufacturer, prodname, question)
+
+    return JSONResponse({"ai_answer": ai_answer, "manufacturer": manufacturer, "prodname": prodname})
+
+
+@app.get("/api/ask")
+async def api_ask_get(q: str = ""):
+    text = (q or "").strip()
+    manufacturer, prodname = parse_natural_query(text)
+    ai_answer = None
+    if manufacturer and prodname and text and is_question(text):
+        ai_answer = answer_about_pump(manufacturer, prodname, text)
+        if not ai_answer:
+            ai_answer = _fallback_ai_answer(manufacturer, prodname, text)
+    return JSONResponse({"ai_answer": ai_answer, "manufacturer": manufacturer, "prodname": prodname})
+
+
+frontend_dir = Path(__file__).resolve().parent / "frontend"
+main_page = frontend_dir / "main_page.html"
+index_page = frontend_dir / "index.html"
+
+if main_page.exists() and not index_page.exists():
+    main_page.rename(index_page)
+app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")

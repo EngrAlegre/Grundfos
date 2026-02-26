@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NeuralFlow</title>
+<link rel="stylesheet" href="m_page.css">
+<link rel="icon" type="image/png" href="logoo.png">
+</head>
+<body class="landing">
+
+<div class="hero">
+
+  <div class="hero-image"></div>
+
+  <div class="hero-content">
+<h1 class="logo">NEURAL<span>FLOW</span></h1>
+<p class="subtitle">Smart Pump Specification Assistant</p>
+
+<div class="divider"></div>
+
+<h2 class="hero-title">
+  Find Pump Specifications in<br>
+  Seconds.
+</h2>
+
+<p class="desc-main">
+  NeuralFlow is an intelligent pump research assistant that automatically extracts
+  and organizes technical specifications from structured datasets and product sources.
+</p>
+
+<p class="desc-sub">
+  Simply enter a pump model and receive accurate flow rates, head values,
+  power requirements, and operating details in seconds.
+</p>
+
+<p class="highlight-text">Start analyzing pump data now.</p>
+
+<a href="chat_page.html" class="btn-primary">Get Specifications</a>
+<a href="#" class="btn-secondary" id="howItWorksBtn">How it Works</a>
+  </div>
+
+</div>
+
+<!-- ================= MODAL ================= -->
+
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+
+  const btn = document.getElementById("howItWorksBtn");
+  const modal = document.getElementById("howModal");
+  const closeBtn = document.querySelector(".close-modal");
+
+  if (!btn || !modal || !closeBtn) return;
+
+  btn.addEventListener("click", (e) => {
+    e.preventDefault();
+    modal.classList.add("active");
+  });
+
+  closeBtn.addEventListener("click", () => {
+    modal.classList.remove("active");
+  });
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      modal.classList.remove("active");
+    }
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      modal.classList.remove("active");
+    }
+  });
+
+});
+</script>
+
+<div class="modal-overlay" id="howModal">
+  <div class="modal">
+    
+    <div class="modal-header">
+      <h2>How NeuralFlow Works</h2>
+      <button class="close-modal">&times;</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="step">
+        <span class="step-number">1</span>
+        <p>Enter a pump model number.</p>
+      </div>
+
+      <div class="step">
+        <span class="step-number">2</span>
+        <p>NeuralFlow searches structured datasets.</p>
+      </div>
+
+      <div class="step">
+        <span class="step-number">3</span>
+        <p>Follow-up questions are supported instantly.</p>
+      </div>
+
+      <div class="step">
+        <span class="step-number">4</span>
+        <p>Specifications are extracted and validated.</p>
+      </div>
+
+      <div class="step">
+        <span class="step-number">5</span>
+        <p>Results are displayed instantly.</p>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

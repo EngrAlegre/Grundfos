@@ -81,7 +81,7 @@ def _parse_raw_response(raw: str) -> dict:
     if not text:
         return {}
 
-    # 1) Best case: hassistant already returned pure JSON.
+    # 1) Best case: assistant already returned pure JSON.
     try:
         obj = json.loads(text)
         if isinstance(obj, dict):
