@@ -6,7 +6,7 @@ import streamlit as st
 import json
 import re
 import time
-from src.agent import lookup_pump
+from src.agent import lookup_pump_hybrid, answer_about_pump, evaluate_retrieval_metric
 
 st.set_page_config(
     page_title="NeuralFlow - Pump Researcher",
@@ -61,10 +61,41 @@ st.markdown("""
         font-size: 0.9rem;
         margin-top: 10px;
     }
+    /* Badge Styles */
+    .source-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-left: 10px;
+        color: white;
+    }
+    .source-local {
+        background-color: #10b981; /* Green for fast/local */
+    }
+    .source-web {
+        background-color: #3b82f6; /* Blue for web */
+    }
     div[data-testid="stForm"] {
         border: 2px solid #e5e7eb;
         border-radius: 16px;
         padding: 20px;
+    }
+    .ai-answer-card {
+        background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+        border: 1px solid #4f46e5;
+        border-radius: 12px;
+        padding: 20px;
+        margin-top: 16px;
+        color: #e0e7ff;
+        font-size: 0.95rem;
+        line-height: 1.6;
+    }
+    .ai-answer-card h4 {
+        margin: 0 0 10px 0;
+        color: #a5b4fc;
+        font-size: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -93,12 +124,73 @@ def parse_natural_query(query: str) -> tuple[str, str]:
         pattern = rf"^{re.escape(brand)}\b\s*(.+)"
         m = re.match(pattern, query, re.IGNORECASE)
         if m:
-            return brand.upper(), m.group(1).strip()
+            prod = m.group(1).strip().strip(".,;:!?")
+            return brand.upper(), prod
 
     parts = query.split(None, 1)
     if len(parts) == 2:
-        return parts[0].upper(), parts[1].strip()
-    return "", query
+        return parts[0].upper(), parts[1].strip().strip(".,;:!?")
+    return "", query.strip().strip(".,;:!?")
+
+
+_QUESTION_PATTERNS = re.compile(
+    r"\?|"
+    r"\b(?:what|how|why|where|when|which|who|does|is\s+it|can\s+it|"
+    r"tell\s+me|explain|describe|suitable|recommend|compare)\b",
+    re.IGNORECASE,
+)
+
+
+def is_question(query: str) -> bool:
+    return bool(_QUESTION_PATTERNS.search(query))
+
+
+# Helper to display a single result column (Web or Local)
+def render_single_result(title, result, manufacturer, prodname, elapsed=None, source_type="web", confidence_text=None):
+    st.markdown(f"#### {title}")
+    
+    # Using the same CSS classes for consistency
+    col1, col2, col3 = st.columns(3)
+    flow = result.get("FLOWNOM56", "unknown")
+    head = result.get("HEADNOM56", "unknown")
+    phase = result.get("PHASE", "unknown")
+
+    with col1:
+        cls = "unknown-value" if flow == "unknown" else "metric-value"
+        display = "N/A" if flow == "unknown" else f"{flow}"
+        unit = "" if flow == "unknown" else " m3/h"
+        st.markdown(f'<div class="metric-label">Flow Rate</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+
+    with col2:
+        cls = "unknown-value" if head == "unknown" else "metric-value"
+        display = "N/A" if head == "unknown" else f"{head}"
+        unit = "" if head == "unknown" else " m"
+        st.markdown(f'<div class="metric-label">Head</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
+
+    with col3:
+        cls = "unknown-value" if phase == "unknown" else "metric-value"
+        display = "N/A" if phase == "unknown" else f"{phase}-Phase"
+        st.markdown(f'<div class="metric-label">Electrical Phase</div><div class="{cls}">{display}</div>', unsafe_allow_html=True)
+
+    # Badge and Time
+    badge_class = "source-web" if source_type == "web" else "source-local"
+    badge_text = "Web Search" if source_type == "web" else "Local DB"
+    time_str = f"| {elapsed:.1f}s" if elapsed else ""
+    
+    st.markdown(
+        f'<div style="display:flex; align-items:center; justify-content:center; margin-top:10px;">'
+        f'<span class="source-badge {badge_class}">{badge_text}</span>'
+        f'<span style="margin-left:10px; color:#9ca3af; font-size:0.9rem;">{time_str}</span>'
+        f'</div>', 
+        unsafe_allow_html=True
+    )
+    if confidence_text:
+        st.markdown(
+            f'<div style="text-align:center; color:#9ca3af; font-size:0.95rem; margin-top:8px;">'
+            f'Web extraction trust: {confidence_text}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
 
 tab1, tab2 = st.tabs(["Natural Search", "Manual Input"])
@@ -116,45 +208,41 @@ with tab1:
         if not manufacturer:
             st.warning("Could not detect the manufacturer. Try: `TACO 0014-SF1`")
         else:
-            with st.spinner(f"Searching for {manufacturer} {prodname}..."):
+            with st.spinner(f"Searching web for {manufacturer} {prodname}..."):
                 start = time.time()
-                result = lookup_pump(manufacturer, prodname)
-                elapsed = time.time() - start
+                hybrid_result = lookup_pump_hybrid(manufacturer, prodname, force_web=True)
+                web_result = hybrid_result.get("web_result", {})
+                comparison = hybrid_result.get("hybrid_comparison", {})
+                overall_conf = float(comparison.get("overall_confidence", 0.0))
+                overall_label = str(comparison.get("overall_label", "low"))
+                confidence_text = f"{overall_label} ({overall_conf * 100:.1f}%)"
+                # RAG retrieval metrics over local JSON DB
+                metrics = evaluate_retrieval_metric(manufacturer, prodname, k=5)
+                web_elapsed = time.time() - start
 
-            st.markdown("---")
-            col1, col2, col3 = st.columns(3)
-            flow = result.get("FLOWNOM56", "unknown")
-            head = result.get("HEADNOM56", "unknown")
-            phase = result.get("PHASE", "unknown")
+            render_single_result(
+                "🌐 Web Search Result",
+                web_result,
+                manufacturer,
+                prodname,
+                web_elapsed,
+                "web",
+                confidence_text=confidence_text,
+            )
 
-            with col1:
-                cls = "unknown-value" if flow == "unknown" else "metric-value"
-                display = "N/A" if flow == "unknown" else f"{flow}"
-                unit = "" if flow == "unknown" else " m3/h"
-                st.markdown(f'<div class="metric-label">Flow Rate</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
-
-            with col2:
-                cls = "unknown-value" if head == "unknown" else "metric-value"
-                display = "N/A" if head == "unknown" else f"{head}"
-                unit = "" if head == "unknown" else " m"
-                st.markdown(f'<div class="metric-label">Head</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
-
-            with col3:
-                cls = "unknown-value" if phase == "unknown" else "metric-value"
-                display = "N/A" if phase == "unknown" else f"{phase}-Phase"
-                st.markdown(f'<div class="metric-label">Electrical Phase</div><div class="{cls}">{display}</div>', unsafe_allow_html=True)
-
-            st.caption(f"Pump: **{manufacturer} {prodname}** | Completed in {elapsed:.1f}s")
-
-            with st.expander("Raw JSON"):
-                output = {
-                    "MANUFACTURER": manufacturer,
-                    "PRODNAME": prodname,
-                    "FLOWNOM56": flow,
-                    "HEADNOM56": head,
-                    "PHASE": phase,
-                }
-                st.json(output)
+            if is_question(query):
+                with st.spinner("Generating AI answer..."):
+                    answer = answer_about_pump(manufacturer, prodname, query)
+                if answer:
+                    st.markdown(
+                        f'<div class="ai-answer-card">'
+                        f'<h4>🤖 AI Answer</h4>'
+                        f'{answer}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.info("Could not generate an explanation for this pump.")
 
 with tab2:
     with st.form("manual_form"):
@@ -169,45 +257,26 @@ with tab2:
         manual_submit = st.form_submit_button("Look Up", use_container_width=True)
 
     if manual_submit and prod:
-        with st.spinner(f"Searching for {mfr} {prod}..."):
+        with st.spinner(f"Searching web for {mfr} {prod}..."):
             start = time.time()
-            result = lookup_pump(mfr, prod)
-            elapsed = time.time() - start
+            hybrid_result = lookup_pump_hybrid(mfr, prod, force_web=True)
+            web_result = hybrid_result.get("web_result", {})
+            comparison = hybrid_result.get("hybrid_comparison", {})
+            overall_conf = float(comparison.get("overall_confidence", 0.0))
+            overall_label = str(comparison.get("overall_label", "low"))
+            confidence_text = f"{overall_label} ({overall_conf * 100:.1f}%)"
+            metrics = evaluate_retrieval_metric(mfr, prod, k=5)
+            web_elapsed = time.time() - start
 
-        st.markdown("---")
-        col1, col2, col3 = st.columns(3)
-        flow = result.get("FLOWNOM56", "unknown")
-        head = result.get("HEADNOM56", "unknown")
-        phase = result.get("PHASE", "unknown")
-
-        with col1:
-            cls = "unknown-value" if flow == "unknown" else "metric-value"
-            display = "N/A" if flow == "unknown" else f"{flow}"
-            unit = "" if flow == "unknown" else " m3/h"
-            st.markdown(f'<div class="metric-label">Flow Rate</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
-
-        with col2:
-            cls = "unknown-value" if head == "unknown" else "metric-value"
-            display = "N/A" if head == "unknown" else f"{head}"
-            unit = "" if head == "unknown" else " m"
-            st.markdown(f'<div class="metric-label">Head</div><div class="{cls}">{display}<span style="font-size:0.9rem;font-weight:400">{unit}</span></div>', unsafe_allow_html=True)
-
-        with col3:
-            cls = "unknown-value" if phase == "unknown" else "metric-value"
-            display = "N/A" if phase == "unknown" else f"{phase}-Phase"
-            st.markdown(f'<div class="metric-label">Electrical Phase</div><div class="{cls}">{display}</div>', unsafe_allow_html=True)
-
-        st.caption(f"Pump: **{mfr} {prod}** | Completed in {elapsed:.1f}s")
-
-        with st.expander("Raw JSON"):
-            output = {
-                "MANUFACTURER": mfr,
-                "PRODNAME": prod,
-                "FLOWNOM56": flow,
-                "HEADNOM56": head,
-                "PHASE": phase,
-            }
-            st.json(output)
+        render_single_result(
+            "🌐 Web Search Result",
+            web_result,
+            mfr,
+            prod,
+            web_elapsed,
+            "web",
+            confidence_text=confidence_text,
+        )
 
 st.markdown("---")
-st.markdown('<div class="search-hint">Powered by SerpAPI + Mistral 7B | Results cached for faster repeat lookups</div>', unsafe_allow_html=True)
+st.markdown('<div class="search-hint">Powered by Perplexity AI (Sonar) | Web search + extraction in one call</div>', unsafe_allow_html=True)
